@@ -3,22 +3,30 @@ var primitive = require('./types');
 var fs = require('fs');
 var path = require('path');
 
-function Compiler(filename) {
+function Compiler(filename, searchPaths) {
   this.messages = {};
   this.enums = {};
-  this.schema = this.open(filename);
+  this.schema = this.open(filename, searchPaths || []);
 }
 
-Compiler.prototype.open = function(filename) {
+Compiler.prototype.open = function(filename, searchPaths) {
   if (!/\.proto$/i.test(filename) && !fs.existsSync(filename)) {
     filename += '.proto';
   }
 
   var schema = parseSchema(fs.readFileSync(filename, 'utf-8'));
   this.visit(schema, schema.package || '');
-  
+
+  let paths = [path.dirname(filename), ...searchPaths];
   schema.imports.forEach(function(i) {
-    this.open(path.resolve(path.dirname(filename), i));
+    for (let p = 0; p < paths.length; p++) {
+      let file = path.resolve(paths[p], i)
+      if (fs.existsSync(file)) {
+        this.open(file, searchPaths)
+        return
+      }
+    }
+    throw(`file ${i} is not found`)
   }, this);
   
   return schema;
@@ -188,7 +196,7 @@ Compiler.prototype.compileMessage = function(message, root) {
   return res;
 };
 
-module.exports = function(filename, model) {
-  var compiler = new Compiler(filename);
+module.exports = function(filename, model, searchPaths) {
+  var compiler = new Compiler(filename, searchPaths);
   return compiler.compile(model);
 };
