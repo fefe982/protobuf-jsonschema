@@ -84,36 +84,45 @@ Compiler.prototype.compile = function(type) {
  * Resolves a type name at the given path in the schema tree.
  * Returns a compiled JSON schema.
  */
-Compiler.prototype.resolve = function(type, from, base, key) {
+Compiler.prototype.resolve = function(type, from, base, key, stack) {
   if (primitive[type])
     return primitive[type];
   
+  if (!stack) {
+    stack = {}
+  }
   var lookup = from.split('.');
   for (var i = lookup.length; i >= 0; i--) {
     var id = lookup.slice(0, i).concat(type).join('.');
-  
-    // If this type was used before, move it from inline to a reusable definition
-    if (this.root.used[id] && !this.root.definitions[id]) {
-      var k = this.root.used[id];
-      this.root.definitions[id] = k[0][k[1]];
-      k[0][k[1]] = { $ref: '#/definitions/' + id };
+
+    if (stack[id]) {
+      return {$ref: '#/recursive/' + id}
     }
+    // // If this type was used before, move it from inline to a reusable definition
+    // if (this.root.used[id] && !this.root.definitions[id]) {
+    //   var k = this.root.used[id];
+    //   this.root.definitions[id] = k[0][k[1]];
+    //   k[0][k[1]] = { $ref: '#/definitions/' + id };
+    // }
   
-    // If already defined, reuse
-    if (this.root.definitions[id])
-      return { $ref: '#/definitions/' + id };
+    // // If already defined, reuse
+    // if (this.root.definitions[id])
+    //   return { $ref: '#/definitions/' + id };
   
     // Compile the message or enum
     var res;
-    if (this.messages[id])
-      res = this.compileMessage(this.messages[id]);
+    if (this.messages[id]) {
+      stack[id] = 1
+      res = this.compileMessage(this.messages[id], stack);
+      stack[id] = 0
+    }
   
     if (this.enums[id])
       res = this.compileEnum(this.enums[id]);
   
     if (res) {
       // If used, or at the root level, make a definition
-      if (this.root.used[id] || !base) {
+      if (/*this.root.used[id] ||*/ !base) {
         this.root.definitions[id] = res;
         res = { $ref: '#/definitions/' + id };
       }
@@ -132,8 +141,8 @@ Compiler.prototype.resolve = function(type, from, base, key) {
 /**
  * Compiles and assigns a type
  */
-Compiler.prototype.build = function(type, from, base, key) {
-  var res = this.resolve(type, from, base, key);
+Compiler.prototype.build = function(type, from, base, key, stack) {
+  var res = this.resolve(type, from, base, key, stack);
   if (base)
     base[key] = res;
 };
@@ -154,7 +163,7 @@ Compiler.prototype.compileEnum = function(enumType, root) {
 /**
  * Compiles a protobuf message to JSON schema
  */
-Compiler.prototype.compileMessage = function(message, root) {
+Compiler.prototype.compileMessage = function(message, stack) {
   var res = {
     title: message.name,
     type: 'object',
@@ -180,9 +189,9 @@ Compiler.prototype.compileMessage = function(message, root) {
           items: null
         };
         
-        this.build(field.type, message.id, f, 'items');
+        this.build(field.type, message.id, f, 'items', stack);
       } else {
-        this.build(field.type, message.id, res.properties, field.name);
+        this.build(field.type, message.id, res.properties, field.name, stack);
       }
     }
     
